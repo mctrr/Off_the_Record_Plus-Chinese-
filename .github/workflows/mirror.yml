@@ -1,6 +1,14 @@
 name: 镜像到 GitCode
 
-# GitHub 是唯一源仓库；push 到 main 或推 v* tag 后自动镜像到 GitCode。
+# 本地仓库（work/）是唯一真身，GitHub 与 GitCode 都是镜像。
+# push 到 main 或推 v* tag 后，本工作流把 GitHub 上的内容原样 force 覆盖到 GitCode。
+#
+# 为什么是 force：两边历史早就各自独立（GitCode 是 75 条真实提交，
+# GitHub 早先是网页建仓 + API 合成提交），没有共同祖先，
+# 常规 push 必然被 `rejected (fetch first)` 挡下。
+# 用户 2026-10-26 明确：历史可以直接删，怎么方便怎么来 → 以本次推送为准覆盖。
+# 代价：GitCode 上被覆盖掉的旧历史会消失，但文件树内容完全一致。
+#
 # 需要 Secret: GITCODE_TOKEN（GitCode 访问令牌，write_repository 权限）
 on:
   push:
@@ -37,20 +45,15 @@ jobs:
           git config http.https://gitcode.com/.extraheader "Authorization: Basic $BASIC"
           git remote add gitcode https://gitcode.com/Fallend/Off_the_Record_Plus.git
 
-          # 若远端存在本地没有的提交（比如有人在网页上直接改过），
-          # push 会失败。这是需要人处理的情况——不要 force，直接报错。
-          echo "=== 推 main ==="
-          git push gitcode HEAD:refs/heads/main
+          echo "=== 推 main（force） ==="
+          git push --force gitcode HEAD:refs/heads/main
 
-          echo "=== 推 v* tag ==="
+          echo "=== 推 v* tag（force） ==="
           git tag -l 'v*' | while read -r t; do
-            echo "  $t"
-            # 已存在就跳过，不覆盖（防止把远端 tag 挪走）
-            if git ls-remote --tags gitcode "refs/tags/$t" | grep -q .; then
-              echo "    远端已有，跳过"
-            else
-              git push gitcode "refs/tags/$t:refs/tags/$t"
-            fi
+            echo "  $t -> $(git rev-parse --short "$t")"
+            # 同名旧 tag 可能指向另一条历史里的提交，普通推会被
+            # "already exists" 拒绝，所以一并 force。
+            git push --force gitcode "refs/tags/$t:refs/tags/$t"
           done
 
           git config --unset http.https://gitcode.com/.extraheader || true
@@ -59,13 +62,22 @@ jobs:
         run: |
           set -eu
           sleep 3
-          LOCAL=$(git rev-parse HEAD)
           REMOTE=$(git ls-remote https://gitcode.com/Fallend/Off_the_Record_Plus.git refs/heads/main | cut -f1)
-          echo "本地 $LOCAL"
-          echo "远端 $REMOTE"
-          # 推 tag 时 HEAD 就是 tag 指向的提交，main 也应指向它（都在 main 上打的 tag）
-          if [ "$LOCAL" != "$REMOTE" ]; then
-            echo "::error::远端 main ($REMOTE) 与本地 ($LOCAL) 不一致"
+          echo "本次推送 $GITHUB_SHA"
+          echo "GitCode main $REMOTE"
+          if [ "$GITHUB_SHA" != "$REMOTE" ]; then
+            echo "::error::GitCode main ($REMOTE) 与本次推送 ($GITHUB_SHA) 不一致"
             exit 1
           fi
+
+          # tag 逐个核对指向
+          git tag -l 'v*' | while read -r t; do
+            WANT=$(git rev-parse "$t")
+            GOT=$(git ls-remote https://gitcode.com/Fallend/Off_the_Record_Plus.git "refs/tags/$t" | cut -f1)
+            if [ "$WANT" != "$GOT" ]; then
+              echo "::error::tag $t 不一致：本地 $WANT / GitCode $GOT"
+              exit 1
+            fi
+            echo "  tag $t OK"
+          done
           echo "镜像一致"

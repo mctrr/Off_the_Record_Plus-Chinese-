@@ -23,7 +23,8 @@ import time
 import zipfile
 
 # 本补丁的发布版本号。改版本只需改这一行；git 标签用于对账。
-VERSION = '0.2a'
+# 版本号递增口诀：0.2a -> 0.2b -> ... -> 0.2z -> 0.3a
+VERSION = '1.1'
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
