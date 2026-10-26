@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -109,6 +110,17 @@ def main():
             c, _ = call('%s/releases/assets/%d' % (API, asset['id']), a.token,
                         'DELETE')
             print('  删掉旧附件 %s -> %s' % (asset['name'], c))
+            # 删除是异步的：紧跟着用同一个 name 上传会拿到 404 / 422
+            # （实测）。等它真的从列表里消失再继续。
+            for _ in range(10):
+                time.sleep(1.5)
+                cc, rr = call('%s/releases/%d/assets' % (API, rel['id']), a.token)
+                if cc != 200:
+                    continue
+                names = [x['name'] for x in json.loads(rr) if x['name'].endswith('.zip')]
+                if not names:
+                    break
+                print('    仍在列表里：%s，继续等' % names)
 
     upload_url = rel['upload_url'].split('{')[0]
     url = '%s?name=%s' % (upload_url, urllib.parse.quote(ascii_name))
