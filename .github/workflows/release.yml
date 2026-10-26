@@ -45,21 +45,25 @@ jobs:
       - name: 算出本次版本号
         id: vars
         shell: bash
+        env:
+          # 不加这个，git diff --name-only 会把中文名输出成
+          # "GITHUB_CI_\351\205\215..." 这种八进制转义，后面的过滤正则
+          # 一条都对不上，文档改动会被当成实质改动而误发版。
+          # （本地同样踩过：gh_push_api.py 曾因此把中文文件判成已删除。）
+          GIT_CONFIG_PARAMETERS: "'core.quotepath=false'"
         run: |
           set -eu
           BASE=$(grep -oP "^VERSION = '\K[^']+" build.py)
           N=$(git rev-list --count HEAD)
-          VER="$BASE.$N"                    # 1.1 + 第15个提交 -> 1.1.15
-          TAG="v$VER"
           echo "base=$BASE"     >> "$GITHUB_OUTPUT"
-          echo "ver=$VER"       >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"       >> "$GITHUB_OUTPUT"
-          echo "== 主版本 $BASE / 第 $N 个提交 -> $TAG"
+          echo "== 主版本 $BASE / 第 $N 个提交"
 
           # 本次提交如果只是改文档/CI，不出包。
-          # 判断依据：除了 md/txt 说明和 .github/ 以外，有没有实质文件变动。
+          # 判断依据：除了 md 和 .txt 说明、以及 .github/ 以外，有没有别的文件变动。
+          # 说明类文件一律按扩展名认，不再逐个列文件名——中文文件名在这里
+          # 很容易因为编码转义而漏配。
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -vE '^(\.github/|.*\.md$|GITHUB_CI_配置指南\.txt$)' || true)
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -vE '^(\.github/|.*\.md$|.*\.txt$)' || true)
             if [ -z "$CHANGED" ]; then
               echo "publish=no" >> "$GITHUB_OUTPUT"
               echo "::notice::本次只动了说明/CI，跳过出包"
@@ -67,7 +71,13 @@ jobs:
             fi
             echo "实质改动："; echo "$CHANGED"
           fi
-          echo "publish=yes" >> "$GITHUB_OUTPUT"
+
+          VER="$BASE.$N"                    # 1.1 + 第16个提交 -> 1.1.16
+          TAG="v$VER"
+          echo "ver=$VER"       >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"       >> "$GITHUB_OUTPUT"
+          echo "publish=yes"    >> "$GITHUB_OUTPUT"
+          echo "== 本次发布 $TAG"
 
       - name: 构建并出包
         if: steps.vars.outputs.publish == 'yes'
