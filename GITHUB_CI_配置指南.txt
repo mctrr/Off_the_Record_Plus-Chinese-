@@ -3,90 +3,108 @@
 
 仓库
 ----
-  GitCode  https://gitcode.com/Fallend/Off_the_Record_Plus
   GitHub   https://github.com/mctrr/Off_the_Record_Plus-Chinese-
+  GitCode  https://gitcode.com/Fallend/Off_the_Record_Plus
 
   两边的发行版是同一份产物，附件字节完全相同。
 
 
+一句话版本
+----------
+  改完东西，跑：  sh g.sh c "改了什么"
+
+  就这样。提交、推 GitHub、出包、发两端发行版、镜像到 GitCode，
+  全部自动。不用改版本号，不用打 tag，不用管 GitCode。
+
+
 整体模型
 --------
-  本地 work/ 目录是唯一真身。
-  GitCode 与 GitHub 都只是镜像。
+  本地 work/  ──push──>  GitHub  ──Actions──>  ①出包并发 GitHub 发行版
+                                            └>  ②force 镜像到 GitCode
+                                            └>  ③同步发 GitCode 发行版
 
-  推一个 v* tag → GitHub Actions 自动：
-    1. 在 windows-latest 上跑 build.py（原生跑 BCS_TXT.exe）
-    2. 校验 zip 里带 data/frontend/str_en.bcs（解压到游戏根目录即装好）
-    3. 建 GitHub 发行版
-    4. 建 GitCode 发行版
-    5. 把 main 与 tag force 镜像回 GitCode
-
-  不需要本地打包，不需要手动传附件。
+  GitHub 是唯一入口。本地只往 GitHub 推，GitCode 由 GitHub 那边反向覆盖。
+  （以前的模型是「本地推 GitCode，GitHub 镜像回来」，已经倒过来了。）
 
 
-发布新版本
-----------
-  1. 改 build.py 顶部的 VERSION，例如：
-         VERSION = '1.2'
+版本号怎么来的
+--------------
+  build.py 顶部只有一行要管：
 
-  2. 提交并打 tag（tag 名 = v + VERSION，必须一致）：
+      VERSION = '1.1'
 
-         cd "C:/Users/123/WorkBuddy/汉化/Off_the_Record_Plus-Chinese-/work"
-         git add -A
-         git commit -m "release: v1.2"
-         git tag v1.2
+  这是「主版本」。每次 push 时 GitHub Actions 自动接上提交数：
 
-  3. 推到 GitCode（本机 git push GitHub 会 408，见下文）：
+      主版本 1.1 + 第 16 个提交  ->  1.1.16  ->  tag v1.1.16
 
-         BASIC=$(printf 'Fallend:%s' "$GITCODE_TOKEN" | base64 -w0)
-         git -c http.https://gitcode.com/.extraheader="Authorization: Basic $BASIC" \
-             push origin HEAD:refs/heads/main
-         git -c http.https://gitcode.com/.extraheader="Authorization: Basic $BASIC" \
-             push origin refs/tags/v1.2:refs/tags/v1.2
+  所以日常完全不用碰它。只有想单开一个大版本（1.1 → 1.2）时才改这一行。
+  版本号只允许 0-9A-Za-z.-，别的字符 git tag 和 GitHub 附件名都不认。
 
-  4. 推到 GitHub（用脚本，不用 git push）：
 
-         GH_PAT=ghp_xxx python ../../.tools/gh_push_api.py
-         GH_PAT=ghp_xxx python ../../.tools/gh_sync_tags.py
+什么时候会出包
+--------------
+  推 main 后判定本次改动：
+    - 只有 .md / 说明 txt / .github/ 里的东西变了  ->  跳过出包，只镜像
+    - 其它任何文件变了（补丁表、bcs、build.py…）   ->  出包并发布
 
-     gh_push_api.py 会把工作区与本地 HEAD 推上去，并核对 tree sha 一致；
-     gh_sync_tags.py 把所有本地 tag 打到 GitHub 的 main head 上。
-
-  5. GitHub Actions 里「发布」会自动跑。跑完两端都有 v1.2。
-
-  ⚠️ VERSION 与 tag 必须一致，否则「发布」会走「非当前版本，跳过」分支，不出包。
-     这是有意的：镜像历史 tag 时不该重新出包。
+  加这条是为了不刷一屏只有文档改动的空发行版。
+  想强行出包：Actions → 发布 → Run workflow。
 
 
 附件命名
 --------
-  GitCode：丧尸围城2绝密档案Plus-汉化补丁-v1.2.zip（中文名正常）
-  GitHub ：DR2-OTR-Plus-CHS-v1.2.zip
+  GitCode：丧尸围城2绝密档案Plus-汉化补丁-v1.1.16.zip（中文名正常）
+  GitHub ：DR2-OTR-Plus-CHS-v1.1.16.zip
 
   GitHub 的 uploads API 不接受非 ASCII 文件名——传中文名会落成 default.zip，
   传中文全名直接 422。所以 GitHub 那边固定用 ASCII 名，
-  中文版本信息放在发行版标题里。
+  中文版本信息放在发行版标题里（标题是「汉化补丁 v1.1.16」）。
+
+
+g.sh 全部命令
+-------------
+  sh g.sh p              开工前自检（动文件前必跑）
+  sh g.sh s              看未提交改动
+  sh g.sh g              最近 15 次提交
+  sh g.sh d <n>          看某次提交改了哪些 ID
+  sh g.sh b              只构建，不出包不推
+  sh g.sh i              构建 + 部署到游戏（覆盖前自动备份）
+  sh g.sh c "说明"       提交 + 推 GitHub + 自动发版   ← 日常只用这个
+
+  g.sh c 需要的 GitHub 令牌存在 .git/gh_token（一行纯 token）。
+  .git/ 不进版本库，token 不会泄漏到仓库里。
 
 
 已踩过的坑（别再重复）
 ----------------------
+  GitHub 推送
+    - 本机推 GitHub 恒定 HTTP 408，真正原因是走错了代理：
+        · 环境变量 HTTP(S)_PROXY 指向沙箱代理 → TLS 握手即断
+        · ~/.gitconfig 里 http.proxy = 127.0.0.1:10808 是对的
+      解法就是 g.sh c 里那行 env -u ... 清掉环境变量，只留 -c http.proxy。
+      （之前以为是仓库太大/内容有问题，都排除了：仓库才 1.54 MiB）
+    - 直连 github.com:443 是连不上的，必须过 10808。
+
+  GitHub Actions
+    - 用 GITHUB_TOKEN 推的 tag 不会再次触发工作流（GitHub 的规则），
+      所以 mirror 工作流额外接受 workflow_dispatch。
+    - 本地与远端历史曾经是「同内容不同 SHA」的两条平行历史
+      （一次 git push、一次 REST API，commit message 的空格/换行不同）。
+      已用 .tools/rebase_align.py 把本地分支指到 GitHub 那条，
+      现在三端 SHA 完全相同，普通 push 就能快进。
+    - Actions 里的 tag 是最后一步打的：前面失败不会留下指向半成品的 tag。
+
   GitCode
     - 令牌走 ?access_token= query 参数，Authorization 头一律 401
     - 更新发行版必须 PATCH /releases/<tag>，PUT 返回 404
     - Release 对象没有 id，只能按 tag 定位
     - 附件上传三步：GET upload_url → PUT 预签名地址（headers 原样带回）
     - 令牌会静默失效：API 和 git 写全 401，但只读克隆照常，
-      所以「能 clone」不代表令牌活着。测法：curl 一下 API 和 git-receive-pack
-
-  GitHub
-    - git push 恒定 HTTP 408（postBuffer / HTTP1.1 / 代理都试过，无效），
-      只能走 REST API：blobs → trees → commits → PATCH refs
-    - 必须用 base_tree 且 parents 指向远端 main，否则推成孤儿快照
-    - git ls-files 要加 -c core.quotepath=false，否则中文路径变八进制转义
-    - Windows 上所有文件按 100644 记，别用 os.access(X_OK) 猜
-    - uploads API 不吃中文附件名（见上）
-    - POST /releases 的响应里 assets 恒为空；DELETE 是异步的，
-      删完要轮询到列表清空再传同名文件
+      所以「能 clone」不代表令牌活着。
+    - 除自定义附件外，GitCode 还会自动挂 v1.1.16.zip / .tar.gz /
+      .tar.bz2 / .tar 四个源码包，属正常，不用管。
+    - 仓库曾经与 GitHub 无共同祖先，mirror 用 force 覆盖。
+      现在历史已对齐，force 只是保险，不会再丢东西。
 
   Windows runner
     - build.py 一 print 中文就 UnicodeEncodeError（cp1252）。
@@ -94,19 +112,29 @@
       sys.stdout.reconfigure(encoding='utf-8')（build.py 已内置）
 
   本地
-    - git push 可能静默超时（exit 0 但远端没变），
-      必须在新开的 shell 里 ls-remote 复核
-    - refs/remotes/origin/* 每次操作后消失，
-      比较时用 ls-remote 或显式 fetch 到 refs/remotes/origin/main
+    - refs/remotes/origin/* 在某些 shell 调用之间会消失，
+      比较时用 ls-remote 或显式 fetch 到 refs/remotes/xxx。
+    - CDPATH 里带 "." 会让 cd 打印路径到 stdout，
+      用 $(pwd) 判断当前目录时会被骗。
 
 
-手动补发某个版本
-----------------
-  GitHub Actions → 发布 → Run workflow → tag 填 v1.2 → Run
-  （build.py 的 VERSION 必须等于该 tag，否则会跳过）
+历史对齐脚本
+------------
+  .tools/rebase_align.py
+    两边 tree 相同但 SHA 不同时，把本地分支指到远端那条历史。
+    有安全检查：tree 不一致就拒绝覆盖。
+    用法：python rebase_align.py --fetch-token <PAT>
+          python rebase_align.py --from-ref FETCH_HEAD
+
+
+手动补发 / 强行出包
+-------------------
+  GitHub Actions → 发布 → Run workflow → Run
+  版本号按当前 HEAD 的提交数重新算，若已存在同名发行版会更新附件。
 
 
 恢复被覆盖的旧历史
 ------------------
-  两边的历史已按「本地为准」force 过，旧历史不再可达。
-  文件内容没有丢——每次 force 推的都是完整快照。
+  现在三端 SHA 一致，正常 push 即可，不需要 force。
+  万一需要：mirror 工作流里 push 带 --force，只影响 GitCode 的远端引用，
+  文件内容每次都是完整快照，不会丢东西。
