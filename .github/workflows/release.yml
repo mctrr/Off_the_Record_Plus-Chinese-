@@ -61,6 +61,7 @@ jobs:
           else
             echo "publish=no" >> "$GITHUB_OUTPUT"
             echo "::notice::tag $TAG 不是当前版本（$PY_VER），跳过出包"
+          fi
 
       - name: 非发布 tag，结束
         if: steps.vars.outputs.publish != 'yes'
