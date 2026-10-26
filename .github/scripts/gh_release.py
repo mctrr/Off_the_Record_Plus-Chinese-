@@ -93,6 +93,11 @@ def main():
 
     fn = os.path.basename(a.zip)
 
+    # GitHub 的 uploads API 不接受非 ASCII 附件名：实测传 name=测试汉化.zip
+    # 会落成 default.zip，传中文全名会 422。所以附件名一律用 ASCII，
+    # 中文版本信息放在发行版标题里（GitHub 支持）。
+    ascii_name = 'DR2-OTR-Plus-CHS-v%s.zip' % a.tag.lstrip('v')
+
     # 附件列表要从 GET /releases/<id> 现取：POST /releases 的响应体里
     # assets 是空数组，靠它找不到已有附件，上传同名会 422 already_exists。
     c, r = call('%s/releases/%d' % (API, rel['id']), a.token)
@@ -100,17 +105,16 @@ def main():
         rel = json.loads(r)
 
     for asset in rel.get('assets', []):
-        if asset['name'] == fn:
+        if asset['name'].endswith('.zip'):
             c, _ = call('%s/releases/assets/%d' % (API, asset['id']), a.token,
                         'DELETE')
-            print('  删掉旧同名附件 %s -> %s' % (asset['name'], c))
+            print('  删掉旧附件 %s -> %s' % (asset['name'], c))
 
     upload_url = rel['upload_url'].split('{')[0]
-    url = '%s?name=%s' % (upload_url, urllib.parse.quote(fn))
-    print('=== 上传附件 %s ===' % fn)
+    url = '%s?name=%s' % (upload_url, urllib.parse.quote(ascii_name))
+    print('=== 上传附件 %s（本地名 %s） ===' % (ascii_name, fn))
     data = open(a.zip, 'rb').read()
-    code, resp = call(url, a.token, 'POST', raw=data,
-                      ctype='application/zip')
+    code, resp = call(url, a.token, 'POST', raw=data, ctype='application/zip')
     if code not in (200, 201):
         print('  失败 %s %s' % (code, resp[:300]))
         return 1
