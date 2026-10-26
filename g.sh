@@ -3,8 +3,13 @@
 #             p 开工前自检（每次动文件前先跑这个）
 #             b 构建（体检 + 打包 bcs + 出 build/ 发布包），多余参数透传给 build.py
 #             i 构建并部署到游戏（覆盖前自动备份到 _backup/）
-# 用法：sh g.sh [s|d <n>|p|g|b [--check|--install|--force]|i]
+#             c 提交并推 GitHub —— 推上去就自动出包、发两端发行版，不用管别的
+# 用法：sh g.sh [s|d <n>|p|g|b [--check|--install|--force]|i|c "<提交说明>"]
 cd "$(dirname "$0")" || exit 1
+
+GH_REPO="mctrr/Off_the_Record_Plus-Chinese-.git"
+# 推 GitHub 必须走 v2rayN 的 10808；这台机器上别的代理（沙箱那个）握手就断。
+GH_PROXY="http://127.0.0.1:10808"
 
 case "$1" in
   b)
@@ -61,5 +66,52 @@ case "$1" in
     cp 新的汉化补丁.txt _c.txt && ./BCS_TXT.exe _c.txt >/dev/null 2>&1 \
       && cp _c.bcs 新的汉化补丁.bcs && rm -f _c.txt _c.bcs \
       && echo "已打包 新的汉化补丁.bcs"
+    ;;
+
+  c)
+    # 一条命令走完：提交 -> 推 GitHub -> 那边 CI 自动出包并发两端发行版。
+    # GitCode 由 GitHub 上的「镜像到 GitCode」工作流反向覆盖，不用本地推。
+    #
+    # token 存在 .git/gh_token（不进仓库），没有就提示去建。
+    shift
+    MSG="${1:-}"
+    if [ -z "$MSG" ]; then
+      echo "用法：sh g.sh c \"提交说明\"" >&2
+      exit 2
+    fi
+
+    TOKEN_FILE=".git/gh_token"
+    if [ ! -f "$TOKEN_FILE" ]; then
+      echo "缺 $TOKEN_FILE —— 把 GitHub 令牌（repo 权限）写进去，一行：" >&2
+      echo "  echo ghp_xxxx > .git/gh_token" >&2
+      exit 3
+    fi
+    TOKEN=$(tr -d ' \r\n' < "$TOKEN_FILE")
+
+    git add -A || exit 1
+    if git diff --cached --quiet; then
+      echo "没有要提交的改动"
+    else
+      git commit -m "$MSG" || exit 1
+    fi
+    echo "提交： $(git log -1 --format='%h %s')"
+    echo "推 GitHub……"
+
+    # 清掉环境里的代理变量：这台机器上的 HTTP(S)_PROXY 指向沙箱代理，
+    # 对 github.com 是 TLS 握手即断，必须让 git 只用 -c http.proxy 指定的那个。
+    env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+      git -c http.proxy="$GH_PROXY" -c https.proxy="$GH_PROXY" \
+          -c credential.helper= \
+      push "https://x-access-token:$TOKEN@github.com/$GH_REPO" HEAD:refs/heads/main
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+      echo "★ 推送失败（exit $RC）。改动已提交在本地，没丢。" >&2
+      echo "  换个节点后重跑：sh g.sh c \"$MSG\" 前先执行下面的重试：" >&2
+      echo "  env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \\" >&2
+      echo "    git -c http.proxy=$GH_PROXY push \"https://x-access-token:<token>@github.com/$GH_REPO\" HEAD:refs/heads/main" >&2
+      exit "$RC"
+    fi
+    echo "推上去了。GitHub Actions 会自动出包并发两端发行版，约 3-5 分钟。"
+    echo "看进度： https://github.com/mctrr/Off_the_Record_Plus-Chinese-/actions"
     ;;
 esac

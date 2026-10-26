@@ -1,19 +1,25 @@
 name: 发布
 
-# 推 v* tag 时自动构建，在 GitHub 与 GitCode 两边建发行版，产物同一份。
-# 也能手动触发（填已有 tag），用于补发或修描述。
+# 每次 push 到 main 就出包并发布，GitHub 与 GitCode 同时挂发行版。
+#
+# 不再需要「改 VERSION → 打 tag → 推 → 等」这套手工流程：
+# 构建号取 git 提交数，自动拼成 1.1.23 这种形式，tag 也由本工作流自动打。
+# 想开新的大版本时，才去 build.py 里改 VERSION 那一行。
+#
+# 推 tag 也能触发，用于补发某个版本；手动触发同理。
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: '要发布的 tag（留空则用当前 ref）'
-        required: false
-        type: string
+
+# 连推两下时取消上一次构建，只发最新的那一份，免得建出重复发行版。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write     # 建 GitHub Release 需要
+  contents: write     # 建 GitHub Release、推 tag 需要
 
 jobs:
   release:
@@ -30,47 +36,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0      # 要算 rev-list --count，浅克隆只有 1 个提交
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: 解析版本
+      - name: 算出本次版本号
         id: vars
         shell: bash
         run: |
           set -eu
-          TAG="${{ inputs.tag || github.ref_name }}"
-          # 手动触发时 inputs.tag 可能为空串
-          [ -n "$TAG" ] || TAG="${GITHUB_REF_NAME}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          BASE=$(grep -oP "^VERSION = '\K[^']+" build.py)
+          N=$(git rev-list --count HEAD)
+          VER="$BASE.$N"                    # 1.1 + 第15个提交 -> 1.1.15
+          TAG="v$VER"
+          echo "base=$BASE"     >> "$GITHUB_OUTPUT"
+          echo "ver=$VER"       >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"       >> "$GITHUB_OUTPUT"
+          echo "== 主版本 $BASE / 第 $N 个提交 -> $TAG"
 
-          VER="${TAG#v}"
-          echo "ver=$VER" >> "$GITHUB_OUTPUT"
-
-          # build.py 的 VERSION 必须与 tag 一致，否则包名/说明会和版本对不上。
-          # 这条只在「tag 命中 build.py 当前版本」时才出包；其余 tag（历史
-          # 版本、1 / 1.1 这类旧式名字）一律跳过，不当作错误——
-          # 否则镜像旧 tag 会把工作流判成失败。
-          PY_VER=$(grep -oP "^VERSION = '\K[^']+" build.py)
-          echo "build.py VERSION = $PY_VER / tag = $VER"
-          if [ "$PY_VER" = "$VER" ]; then
-            echo "publish=yes" >> "$GITHUB_OUTPUT"
-            echo "本次要出发行版：$TAG"
-          else
-            echo "publish=no" >> "$GITHUB_OUTPUT"
-            echo "::notice::tag $TAG 不是当前版本（$PY_VER），跳过出包"
+          # 本次提交如果只是改文档/CI，不出包。
+          # 判断依据：除了 md/txt 说明和 .github/ 以外，有没有实质文件变动。
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -vE '^(\.github/|.*\.md$|GITHUB_CI_配置指南\.txt$)' || true)
+            if [ -z "$CHANGED" ]; then
+              echo "publish=no" >> "$GITHUB_OUTPUT"
+              echo "::notice::本次只动了说明/CI，跳过出包"
+              exit 0
+            fi
+            echo "实质改动："; echo "$CHANGED"
           fi
-
-      - name: 非发布 tag，结束
-        if: steps.vars.outputs.publish != 'yes'
-        shell: bash
-        run: echo "跳过，不出包"
+          echo "publish=yes" >> "$GITHUB_OUTPUT"
 
       - name: 构建并出包
         if: steps.vars.outputs.publish == 'yes'
         shell: bash
+        env:
+          DR2_VERSION: ${{ steps.vars.outputs.ver }}
         run: |
           set -eu
           python build.py
@@ -142,8 +145,23 @@ jobs:
           python .github/scripts/gc_release.py \
             --token "$GC" --tag "$TAG" --zip "$ZIP" --body-file notes.md
 
+      # 打完 tag 放在最后：前面失败就不会留下指向半成品的 tag。
+      # 用 GITHUB_TOKEN 推的 tag 不会再次触发工作流（GitHub 的规则），不会死循环。
+      - name: 打版本 tag
+        if: steps.vars.outputs.publish == 'yes'
+        shell: bash
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -eu
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: build-output
           path: build/
+          if-no-files-found: ignore

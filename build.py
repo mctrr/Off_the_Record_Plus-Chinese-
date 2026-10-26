@@ -22,8 +22,9 @@ import tempfile
 import time
 import zipfile
 
-# 本补丁的发布版本号。改版本只需改这一行；git 标签用于对账。
-# 版本号递增口诀：0.2a -> 0.2b -> ... -> 0.2z -> 0.3a
+# 主版本号（大版本）。只有「值得单开一个版本」的更新才改这一行。
+# 日常每次 push 的构建号由 git 提交数自动接在后面，见 app_version()。
+# 例：VERSION='1.1' + 第 23 个提交 -> 1.1.23
 VERSION = '1.1'
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -117,8 +118,27 @@ def read_rows(path):
     return raw, bom, rows
 
 
+# 完整发布版本号 = 主版本 + 构建号。版本号里只允许出现 ASCII 的 0-9A-Za-z.-，
+# 否则 git tag 和 GitHub 附件名都会出问题（GitHub 的 uploads API 不吃中文名）。
+VERSION_ENV = 'DR2_VERSION'
+
+
+def app_version():
+    """完整版本号：VERSION，或在 CI 里用 DR2_VERSION 覆盖。
+
+    GitHub Actions 每次 push 都会跑发布，构建号取提交数（1.1.23 这种），
+    用户不用手工改 VERSION、也不用手工打 tag——push 就完事。
+    本地跑则用 DR2_VERSION（若设了），否则等同于 VERSION。
+    """
+    v = os.environ.get(VERSION_ENV, '').strip()
+    if v and re.fullmatch(r'[0-9A-Za-z][0-9A-Za-z.\-]*', v):
+        return v
+    return VERSION
+
+
 def git_version():
     """(版本串, 短哈希, 提交数)：拿不到 git 就退回日期。"""
+    version = app_version()
     try:
         g = lambda *a: subprocess.run(
             ['git', *a], cwd=HERE, capture_output=True, text=True,
@@ -126,10 +146,10 @@ def git_version():
         n = g('rev-list', '--count', 'HEAD')
         h = g('rev-parse', '--short', 'HEAD')
         if n and h:
-            return 'V%s (build %s)' % (VERSION, h), h, n
+            return 'V%s (build %s)' % (version, h), h, n
     except Exception:
         pass
-    return 'V%s (%s)' % (VERSION, time.strftime('%Y-%m-%d')), 'nogit', '0'
+    return 'V%s (%s)' % (version, time.strftime('%Y-%m-%d')), 'nogit', '0'
 
 
 INSTALL_README = """\
@@ -214,7 +234,7 @@ def publish(row_count):
     for name, p in files:
         ok('出包', '%s  %d 字节' % (name, os.path.getsize(p)))
 
-    zip_name = '丧尸围城2绝密档案Plus-汉化补丁-v%s.zip' % VERSION
+    zip_name = '丧尸围城2绝密档案Plus-汉化补丁-v%s.zip' % app_version()
     zip_path = os.path.join(BUILD_DIR, zip_name)
     # 旧版本号的 zip 别留在 build/ 里混淆发布对象（只清 zip，别的文件不动）
     for f in os.listdir(BUILD_DIR):

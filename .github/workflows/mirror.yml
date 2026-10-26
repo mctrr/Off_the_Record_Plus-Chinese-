@@ -1,11 +1,11 @@
 name: 镜像到 GitCode
 
-# 本地仓库（work/）是唯一真身，GitHub 与 GitCode 都是镜像。
+# 来源是 GitHub：本地只往 GitHub 推，GitHub 上的内容再镜像到 GitCode。
 # push 到 main 或推 v* tag 后，本工作流把 GitHub 上的内容原样 force 覆盖到 GitCode。
 #
-# 为什么是 force：两边历史早就各自独立（GitCode 是 75 条真实提交，
-# GitHub 早先是网页建仓 + API 合成提交），没有共同祖先，
-# 常规 push 必然被 `rejected (fetch first)` 挡下。
+# 为什么是 force：GitCode 那边还有一条本地早先的独立历史（75 条真实提交，
+# 与 GitHub 合成的那条无共同祖先），常规 push 必然被
+# `rejected (fetch first)` 挡下。
 # 用户 2026-10-26 明确：历史可以直接删，怎么方便怎么来 → 以本次推送为准覆盖。
 # 代价：GitCode 上被覆盖掉的旧历史会消失，但文件树内容完全一致。
 #
@@ -14,6 +14,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # 发布工作流打完 tag 后用 GITHUB_TOKEN 推 tag，GitHub 不会为它再触发工作流，
+  # 所以这里额外接受一次手动/被调用触发，保证 tag 也能落到 GitCode。
   workflow_dispatch:
 
 concurrency:
