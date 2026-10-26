@@ -1,0 +1,123 @@
+name: 发布
+
+# 推 v* tag 时自动构建，在 GitHub 与 GitCode 两边建发行版，产物同一份。
+# 也能手动触发（填已有 tag），用于补发或修描述。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（留空则用当前 ref）'
+        required: false
+        type: string
+
+permissions:
+  contents: write     # 建 GitHub Release 需要
+
+jobs:
+  release:
+    # 用原生 Windows 跑 BCS_TXT.exe（32 位 Delphi 程序）。
+    # 不用 ubuntu+wine 是因为 Delphi VCL 的字体/编码在 wine 上偶有差异，
+    # 打包结果的字节可能与本地不一致——这个项目对字节敏感，不值得赌。
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 解析版本
+        id: vars
+        shell: bash
+        run: |
+          set -eu
+          TAG="${{ inputs.tag || github.ref_name }}"
+          # 手动触发时 inputs.tag 可能为空串
+          [ -n "$TAG" ] || TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          VER="${TAG#v}"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+
+          # build.py 的 VERSION 必须与 tag 一致，否则包名/说明会和版本对不上
+          PY_VER=$(grep -oP "^VERSION = '\K[^']+" build.py)
+          echo "build.py VERSION = $PY_VER / tag = $VER"
+          if [ "$PY_VER" != "$VER" ]; then
+            echo "::error::build.py VERSION ($PY_VER) 与 tag ($VER) 不一致，先改版本号再打 tag"
+            exit 1
+          fi
+
+      - name: 构建并出包
+        shell: bash
+        run: |
+          set -eu
+          python build.py
+          echo "=== build/ ==="
+          ls -la build/
+          ZIP=$(ls build/*.zip | head -1)
+          echo "产包 $ZIP  $(stat -c %s "$ZIP") 字节"
+
+          # 关键校验：zip 里必须带 data/frontend/ 路径，否则解压到根目录装不上
+          python - <<'PY'
+          import sys, zipfile, glob
+          z = zipfile.ZipFile(glob.glob('build/*.zip')[0])
+          names = z.namelist()
+          print('zip 内容:', names)
+          if 'data/frontend/str_en.bcs' not in names:
+              sys.exit('::error::zip 缺 data/frontend/str_en.bcs，解压后装不上')
+          PY
+
+      - name: 生成发行说明
+        id: notes
+        shell: bash
+        run: |
+          set -eu
+          python .github/scripts/gc_notes.py \
+            --tag "${{ steps.vars.outputs.tag }}" \
+            --txt 新的汉化补丁.txt \
+            --out notes.md
+          echo "--- 预览 ---"
+          cat notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-pkg
+          path: build/*.zip
+
+      # ------------------------------------------------ GitHub Release
+      - name: 建 GitHub 发行版
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: 汉化补丁 ${{ steps.vars.outputs.tag }}
+          body_path: notes.md
+          files: build/*.zip
+          fail_on_unmatched_files: true
+
+      # ------------------------------------------------ GitCode Release
+      # GitCode 的 token 走 query 参数 ?access_token=，不接受 Authorization 头
+      - name: 建 GitCode 发行版
+        shell: bash
+        env:
+          GC: ${{ secrets.GITCODE_TOKEN }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -eu
+          if [ -z "${GC:-}" ]; then
+            echo "::error::缺 Secret GITCODE_TOKEN"
+            exit 1
+          fi
+          ZIP=$(ls build/*.zip | head -1)
+          python .github/scripts/gc_release.py \
+            --token "$GC" --tag "$TAG" --zip "$ZIP" --body-file notes.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-output
+          path: build/

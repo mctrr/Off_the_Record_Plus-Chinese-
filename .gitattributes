@@ -1,0 +1,9 @@
+# 文本表按「原样字节」存取，禁止 git 做换行转换。
+# 原因：这三个 txt 是 CRLF + BOM 的固定格式，换行被转成 LF 后
+# 在别的机器/环境 checkout 出来的文件不再和 bcs 打包链路一致。
+# -text = 不做 eol 归一化，git 存的就是你磁盘上的字节。
+*.txt -text
+
+# 二进制产物，永不 diff、永不转换
+*.bcs binary
+*.exe binary

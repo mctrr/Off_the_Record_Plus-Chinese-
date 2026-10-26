@@ -1,0 +1,34 @@
+name: CI
+
+# 每次 push / PR 都体检一次文本表：结构、token、字形、宽度。有硬伤就红。
+# 注意这里只跑 --check：Linux 上没有 BCS_TXT.exe，不打包。
+# 真打包在 release.yml 里用 windows runner 做。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 体检文本表
+        run: python build.py --check
+
+      - name: 保存体检报告
+        if: always()
+        run: python build.py --check > check-report.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-report
+          path: check-report.txt

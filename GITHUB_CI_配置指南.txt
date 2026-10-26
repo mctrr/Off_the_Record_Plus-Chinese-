@@ -1,0 +1,125 @@
+GitHub → GitCode 双仓同步 + 双发行版 配置指南
+================================================
+
+现状（2026-10-26）
+------------------
+  GitCode  https://gitcode.com/Fallend/Off_the_Record_Plus
+           ✓ 代码已同步到最新提交
+           ✓ v0.2a 发行版已建好，附件已上传
+           ✓ GITCODE_TOKEN 已验证可用（query 参数认证）
+
+  GitHub   https://github.com/mctrr/Off_the_Record_Plus-Chinese-
+           ✗ 仓里还是 2025-06 的旧快照（str_en.txt 才 553KB）
+           ✗ 没有 Actions Secrets
+           → 需要你手动做下面 4 步
+
+
+第 1 步：生成 GitHub PAT（个人访问令牌）
+-----------------------------------------
+  1. 打开  https://github.com/settings/tokens
+  2. 右上角「Generate new token」→ 选「Generate new token (classic)」
+     （Fine-grained 也行，但 classic 少配置几步）
+  3. Note 填「Off-the-Record-Plus CI」
+  4. Expiration 选 90 days 或 No expiration（看你习惯）
+  5. 勾选两个权限：
+        [x] repo            （整个 repo 大项都勾上）
+        [x] workflow        （这个必须勾，否则推不了 .github/workflows）
+  6. 页面底部「Generate token」
+  7. **立刻复制那串 ghp_ 开头的字符**——离开页面就再也看不到了
+
+  ⚠️ 这串东西等于你的 GitHub 密码，别发到任何公开的地方。
+     如果你要发给我，我不反对（我只会用来推这一次），
+     但更稳妥的是你自己执行第 2、3 步。
+
+
+第 2 步：覆盖 GitHub 的旧内容
+------------------------------
+  旧仓是 2025-06 的废弃快照，直接覆盖。在 Git Bash 里跑：
+
+    cd "C:/Users/123/WorkBuddy/汉化/Off_the_Record_Plus-Chinese-/work"
+
+    # 加 GitHub 远端（用你的 PAT，把 ghp_xxx 换成实际值）
+    git remote add github https://<你的用户名>:ghp_xxx@github.com/mctrr/Off_the_Record_Plus-Chinese-.git
+
+    # 推 main（--force 因为两边历史无关，旧内容会被覆盖）
+    git push github main --force
+
+    # 推所有 v* tag
+    git push github --tags
+
+    # 推完把带 token 的 remote 删掉，别留在配置里
+    git remote remove github
+
+  验证：打开 https://github.com/mctrr/Off_the_Record_Plus-Chinese-
+        应该能看到 build.py、g.sh、.github/ 等文件，提交时间是最新的。
+
+
+第 3 步：配 GitHub Actions Secret
+----------------------------------
+  1. 打开  https://github.com/mctrr/Off_the_Record_Plus-Chinese-/settings/secrets/actions
+  2. 点「New repository secret」
+  3. Name 填：   GITCODE_TOKEN
+     Secret 填： 你在 GitCode 生成的那个访问令牌
+     （GitCode 网页 → 头像 → 账号设置 → 访问令牌，勾 write_repository）
+  4. 「Add secret」
+
+  ⚠️ 名字必须一字不差：GITCODE_TOKEN（全大写、下划线）
+  ⚠️ 令牌只填在 GitHub 的 Secret 里，**不要写进任何仓库文件**。
+     这个仓库是公开的，写进去等于公开你的令牌。
+
+
+第 4 步：验证 CI 跑起来
+------------------------
+  1. 打开  https://github.com/mctrr/Off_the_Record_Plus-Chinese-/actions
+  2. 应该能看到两条 workflow 在跑或已跑完：
+        CI                       ← 体检文本表，应该绿
+        镜像到 GitCode           ← 应该绿
+  3. 点进去看日志。CI 那条最后应该是：
+        === 只体检（硬伤 0 项 / 提示 5 项），未打包 ===
+
+  如果「镜像到 GitCode」红了，最常见原因就是 Secret 名字拼错。
+
+
+以后怎么发新版本
+----------------
+  改完文本后，改 build.py 顶部的 VERSION，然后：
+
+    git add -A
+    git commit -m "release: V0.3"
+    git tag v0.3
+    git push origin main          # 推到 GitCode（或先推 GitHub 让 CI 镜像）
+
+  推了 v* tag 之后，GitHub Actions 会自动：
+    1. 在 windows-latest 上跑 build.py 打包（原生跑 BCS_TXT.exe）
+    2. 校验 zip 里带 data/frontend/str_en.bcs
+    3. 建 GitHub 发行版 + 建 GitCode 发行版，挂同一份 zip
+
+  **不需要本地打包、不需要手动传附件。**
+
+  ⚠️ VERSION 必须和 tag 一致，不然 release.yml 会直接报错中止。
+     比如 tag 是 v0.3，build.py 里就得是 VERSION = '0.3'。
+
+
+GitHub 仓被覆盖了，旧内容还能找回吗？
+-------------------------------------
+  能，但很麻烦。旧的 5 个文件还在 GitHub 的 git 历史里，
+  用 `git log --all` 或 GitHub 的 commit 历史能翻到。
+  但你之前已经把它们改名成 原汉化补丁.txt / 新的汉化补丁.txt 了，
+  旧文件（汉化补丁.txt / 翻译文件.txt）没有保留价值。
+
+  如果哪天后悔了，在 GitHub 仓的 Settings → 最底部有「Restore」，
+  或者直接 force push 回旧的 commit hash：
+      git push github <旧commit>:main --force
+
+
+已踩过的坑（写给自己，也记录在这）
+----------------------------------
+  - GitCode API **只认 ?access_token= query 参数**，
+    用 Authorization: token / Basic 头一律 401
+  - 更新 GitCode 发行版必须用 **PATCH**，
+    PUT /releases/<tag> 返回 404 Route Not Found
+  - GitCode 的 Release 对象没有 id 字段，只能按 tag 定位
+  - 附件上传是三步：GET upload_url 拿预签名地址 → PUT 文件 →
+    返回的 headers 必须原样带上
+  - git push 可能静默超时（exit 0 但远端没变），
+    必须在新的 shell 里重新 ls-remote / clone 验证

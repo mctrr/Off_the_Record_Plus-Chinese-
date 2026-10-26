@@ -1,0 +1,71 @@
+name: 镜像到 GitCode
+
+# GitHub 是唯一源仓库；push 到 main 或推 v* tag 后自动镜像到 GitCode。
+# 需要 Secret: GITCODE_TOKEN（GitCode 访问令牌，write_repository 权限）
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-gitcode
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要镜像全部历史与 tag，不能浅克隆
+          fetch-depth: 0
+
+      - name: 镜像 main 与 tag 到 GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${GITCODE_TOKEN:-}" ]; then
+            echo "::error::缺 Secret GITCODE_TOKEN"
+            exit 1
+          fi
+
+          # 不把 token 写进 remote URL（失败时 git 会回显完整 URL，会把 token 打进日志）。
+          # 用 http.extraheader 传认证，GitHub Actions 会自动打码 secret 值。
+          BASIC=$(printf 'Fallend:%s' "$GITCODE_TOKEN" | base64 -w0)
+          git config http.https://gitcode.com/.extraheader "Authorization: Basic $BASIC"
+          git remote add gitcode https://gitcode.com/Fallend/Off_the_Record_Plus.git
+
+          # 若远端存在本地没有的提交（比如有人在网页上直接改过），
+          # push 会失败。这是需要人处理的情况——不要 force，直接报错。
+          echo "=== 推 main ==="
+          git push gitcode HEAD:refs/heads/main
+
+          echo "=== 推 v* tag ==="
+          git tag -l 'v*' | while read -r t; do
+            echo "  $t"
+            # 已存在就跳过，不覆盖（防止把远端 tag 挪走）
+            if git ls-remote --tags gitcode "refs/tags/$t" | grep -q .; then
+              echo "    远端已有，跳过"
+            else
+              git push gitcode "refs/tags/$t:refs/tags/$t"
+            fi
+          done
+
+          git config --unset http.https://gitcode.com/.extraheader || true
+
+      - name: 验证镜像结果
+        run: |
+          set -eu
+          sleep 3
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git ls-remote https://gitcode.com/Fallend/Off_the_Record_Plus.git refs/heads/main | cut -f1)
+          echo "本地 $LOCAL"
+          echo "远端 $REMOTE"
+          # 推 tag 时 HEAD 就是 tag 指向的提交，main 也应指向它（都在 main 上打的 tag）
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "::error::远端 main ($REMOTE) 与本地 ($LOCAL) 不一致"
+            exit 1
+          fi
+          echo "镜像一致"
