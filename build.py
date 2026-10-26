@@ -28,6 +28,16 @@ VERSION = '1.1'
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Windows 上 sys.stdout 在输出被重定向（GitHub Actions、管道、IDE 输出窗口）时
+# 仍是 cp1252，一 print 中文就 UnicodeEncodeError。PYTHONIOENCODING 对这种
+# 「非控制台」情形不生效，必须在进程内 reconfigure。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
 TARGET_TXT = os.path.join(HERE, '新的汉化补丁.txt')
 EN_TXT = os.path.join(HERE, 'str_en.txt')
 TARGET_BCS = os.path.join(HERE, '新的汉化补丁.bcs')
@@ -262,7 +272,6 @@ def install():
 def main():
     print('=== 汉化补丁构建 ===')
     print('  产出文件 %s' % TARGET_TXT)
-
     # --check 只体检不打包，没有打包器也能跑（CI 的 Linux 任务靠这个）
     need = (TARGET_TXT, EN_TXT) if '--check' in sys.argv else (TARGET_TXT, EN_TXT, PACKER)
     for p in need:
