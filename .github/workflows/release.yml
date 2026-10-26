@@ -44,15 +44,26 @@ jobs:
           VER="${TAG#v}"
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
 
-          # build.py 的 VERSION 必须与 tag 一致，否则包名/说明会和版本对不上
+          # build.py 的 VERSION 必须与 tag 一致，否则包名/说明会和版本对不上。
+          # 这条只在「tag 命中 build.py 当前版本」时才出包；其余 tag（历史
+          # 版本、1 / 1.1 这类旧式名字）一律跳过，不当作错误——
+          # 否则镜像旧 tag 会把工作流判成失败。
           PY_VER=$(grep -oP "^VERSION = '\K[^']+" build.py)
           echo "build.py VERSION = $PY_VER / tag = $VER"
-          if [ "$PY_VER" != "$VER" ]; then
-            echo "::error::build.py VERSION ($PY_VER) 与 tag ($VER) 不一致，先改版本号再打 tag"
-            exit 1
-          fi
+          if [ "$PY_VER" = "$VER" ]; then
+            echo "publish=yes" >> "$GITHUB_OUTPUT"
+            echo "本次要出发行版：$TAG"
+          else
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::tag $TAG 不是当前版本（$PY_VER），跳过出包"
+
+      - name: 非发布 tag，结束
+        if: steps.vars.outputs.publish != 'yes'
+        shell: bash
+        run: echo "跳过，不出包"
 
       - name: 构建并出包
+        if: steps.vars.outputs.publish == 'yes'
         shell: bash
         run: |
           set -eu
@@ -73,6 +84,7 @@ jobs:
           PY
 
       - name: 生成发行说明
+        if: steps.vars.outputs.publish == 'yes'
         id: notes
         shell: bash
         run: |
@@ -85,12 +97,14 @@ jobs:
           cat notes.md
 
       - uses: actions/upload-artifact@v4
+        if: steps.vars.outputs.publish == 'yes'
         with:
           name: release-pkg
           path: build/*.zip
 
       # ------------------------------------------------ GitHub Release
       - name: 建 GitHub 发行版
+        if: steps.vars.outputs.publish == 'yes'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
@@ -102,6 +116,7 @@ jobs:
       # ------------------------------------------------ GitCode Release
       # GitCode 的 token 走 query 参数 ?access_token=，不接受 Authorization 头
       - name: 建 GitCode 发行版
+        if: steps.vars.outputs.publish == 'yes'
         shell: bash
         env:
           GC: ${{ secrets.GITCODE_TOKEN }}
