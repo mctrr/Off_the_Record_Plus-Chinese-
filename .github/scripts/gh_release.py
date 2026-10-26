@@ -92,12 +92,18 @@ def main():
         return 1
 
     fn = os.path.basename(a.zip)
-    # 已有同名附件就先删，避免重复
+
+    # 附件列表要从 GET /releases/<id> 现取：POST /releases 的响应体里
+    # assets 是空数组，靠它找不到已有附件，上传同名会 422 already_exists。
+    c, r = call('%s/releases/%d' % (API, rel['id']), a.token)
+    if c == 200:
+        rel = json.loads(r)
+
     for asset in rel.get('assets', []):
         if asset['name'] == fn:
             c, _ = call('%s/releases/assets/%d' % (API, asset['id']), a.token,
                         'DELETE')
-            print('  删掉旧同名附件 -> %s' % c)
+            print('  删掉旧同名附件 %s -> %s' % (asset['name'], c))
 
     upload_url = rel['upload_url'].split('{')[0]
     url = '%s?name=%s' % (upload_url, urllib.parse.quote(fn))
