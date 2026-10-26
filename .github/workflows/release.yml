@@ -21,6 +21,11 @@ jobs:
     # 不用 ubuntu+wine 是因为 Delphi VCL 的字体/编码在 wine 上偶有差异，
     # 打包结果的字节可能与本地不一致——这个项目对字节敏感，不值得赌。
     runs-on: windows-latest
+    env:
+      # Windows runner 的默认控制台编码是 cp1252，build.py 一 print 中文就
+      # UnicodeEncodeError（实测 line 263）。强制 UTF-8 输出。
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
