@@ -109,15 +109,20 @@ jobs:
           path: build/*.zip
 
       # ------------------------------------------------ GitHub Release
+      # 不用 softprops/action-gh-release：它上传附件时中文文件名会被截断
+      # （丧尸围城2…-v1.1.zip -> 2.Plus-.-v1.1.zip），改用脚本显式带 name。
       - name: 建 GitHub 发行版
         if: steps.vars.outputs.publish == 'yes'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: 汉化补丁 ${{ steps.vars.outputs.tag }}
-          body_path: notes.md
-          files: build/*.zip
-          fail_on_unmatched_files: true
+        shell: bash
+        env:
+          GH_TOKEN_RLS: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -eu
+          ZIP=$(ls build/*.zip | head -1)
+          python .github/scripts/gh_release.py \
+            --token "$GH_TOKEN_RLS" --tag "$TAG" --zip "$ZIP" \
+            --body-file notes.md --name "汉化补丁 $TAG"
 
       # ------------------------------------------------ GitCode Release
       # GitCode 的 token 走 query 参数 ?access_token=，不接受 Authorization 头
