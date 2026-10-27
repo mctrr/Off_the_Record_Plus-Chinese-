@@ -8,7 +8,9 @@
 cd "$(dirname "$0")" || exit 1
 
 GH_REPO="mctrr/Off_the_Record_Plus-Chinese-.git"
-# 推 GitHub 必须走 v2rayN 的 10808；这台机器上别的代理（沙箱那个）握手就断。
+# 推 GitHub 的两条路，先试代理再试直连。
+# 这台机器的网络状态会变：有时只有 v2rayN 的 10808 通、直连 443 超时；
+# 有时反过来（节点挂了直连反而好）。两种都试，谁通算谁的。
 GH_PROXY="http://127.0.0.1:10808"
 
 case "$1" in
@@ -93,21 +95,45 @@ case "$1" in
     echo "提交： $(git log -1 --format='%h %s')"
     echo "推 GitHub……"
 
+    URL="https://x-access-token:$TOKEN@github.com/$GH_REPO"
+    HEAD_SHA=$(git rev-parse HEAD)
+
     # 清掉环境里的代理变量：这台机器上的 HTTP(S)_PROXY 指向沙箱代理，
-    # 对 github.com 是 TLS 握手即断，必须让 git 只用 -c http.proxy 指定的那个。
-    env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
-      git -c http.proxy="$GH_PROXY" -c https.proxy="$GH_PROXY" \
-          -c credential.helper= \
-      push "https://x-access-token:$TOKEN@github.com/$GH_REPO" HEAD:refs/heads/main
-    RC=$?
+    # 对 github.com 是 TLS 握手即断。之后依次试「走 v2rayN」和「直连」，
+    # 因为这两个通道时好时坏，谁通算谁的。
+    RC=1
+    for mode in proxy direct; do
+      if [ "$mode" = proxy ]; then
+        echo "  [1/2] 经 $GH_PROXY ……"
+        PCFG="-c http.proxy=$GH_PROXY -c https.proxy=$GH_PROXY"
+      else
+        echo "  [2/2] 直连 ……"
+        PCFG="-c http.proxy= -c https.proxy="
+      fi
+      env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+        git $PCFG -c credential.helper= \
+        push "$URL" HEAD:refs/heads/main && RC=0 && MODE_OK=$mode && break
+      RC=$?
+      echo "    这条不通（exit $RC），换下一条"
+    done
+
     if [ "$RC" -ne 0 ]; then
-      echo "★ 推送失败（exit $RC）。改动已提交在本地，没丢。" >&2
-      echo "  换个节点后重跑：sh g.sh c \"$MSG\" 前先执行下面的重试：" >&2
-      echo "  env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \\" >&2
-      echo "    git -c http.proxy=$GH_PROXY push \"https://x-access-token:<token>@github.com/$GH_REPO\" HEAD:refs/heads/main" >&2
+      echo "★ 两条路都不通（exit $RC）。改动已提交在本地，没丢。" >&2
+      echo "  换个 VPN 节点，或换个网络后重试：" >&2
+      echo "  sh g.sh c \"$MSG\"      # 会重新走一遍，已提交则只推" >&2
       exit "$RC"
     fi
-    echo "推上去了。GitHub Actions 会自动出包并发两端发行版，约 3-5 分钟。"
+    echo "  通了（$MODE_OK）"
+
+    # 复核：远端真的变成这个 SHA 才算成（git push 有过 exit 0 但没推上去的情况）
+    GOT=$(env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+          git $PCFG -c credential.helper= ls-remote "$URL" refs/heads/main 2>/dev/null | cut -f1)
+    if [ "$GOT" != "$HEAD_SHA" ]; then
+      echo "★ 远端 main 是 ${GOT:-空}，不是本地的 $HEAD_SHA —— 没推上去" >&2
+      exit 4
+    fi
+    echo "GitHub main = $(echo "$HEAD_SHA" | cut -c1-7)  已核对"
+    echo "GitHub Actions 会自动出包并发两端发行版，约 3-5 分钟。"
     echo "看进度： https://github.com/mctrr/Off_the_Record_Plus-Chinese-/actions"
     ;;
 esac
