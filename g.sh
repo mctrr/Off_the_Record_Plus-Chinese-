@@ -72,9 +72,11 @@ case "$1" in
     #
     # token 存在 .git/gh_token（不进仓库），没有就提示去建。
     shift
+    FORCE=0
+    if [ "$1" = "-y" ]; then FORCE=1; shift; fi
     MSG="${1:-}"
     if [ -z "$MSG" ]; then
-      echo "用法：sh g.sh c \"提交说明\"" >&2
+      echo "用法：sh g.sh c \"提交说明\"     # -y 用于跳过混合改动的确认" >&2
       exit 2
     fi
 
@@ -87,9 +89,34 @@ case "$1" in
     TOKEN=$(tr -d ' \r\n' < "$TOKEN_FILE")
 
     git add -A || exit 1
+
+    # 拦一种真实发生过的事故：补丁表还留着没提交的大改（比如在改译文），
+    # 顺手跑 g.sh c 干别的事，`git add -A` 就把那些半成品一起卷进来了，
+    # 结果它们挂在一句不相干的提交说明下被推上去、还出了发行版。
+    # 只拦「补丁表 + 别的代码文件同时改」这种混合情况——这时大概率不是
+    # 同一件事；单纯只改补丁表当然正常放行。
+    if [ "$FORCE" -eq 0 ]; then
+      STAGED=$(git -c core.quotepath=false diff --cached --name-only)
+      if echo "$STAGED" | grep -qx '新的汉化补丁.txt'; then
+        OTHERS=$(echo "$STAGED" | grep -vE '^(新的汉化补丁\.txt|.*\.md$|GITHUB_CI_配置指南\.txt|\.gitignore)$' | grep -v '^\.github/' || true)
+        if [ -n "$OTHERS" ]; then
+          echo "" >&2
+          echo "★ 这次同时改了补丁表和别的文件，可能不是一件事：" >&2
+          echo "$STAGED" | sed 's/^/    /' >&2
+          echo "" >&2
+          echo "  确认要合成一个提交就加 -y：sh g.sh c -y \"$MSG\"" >&2
+          echo "  想分开提交就先 git reset，再分别 add。" >&2
+          git reset >/dev/null 2>&1
+          exit 5
+        fi
+      fi
+    fi
+
     if git diff --cached --quiet; then
       echo "没有要提交的改动"
     else
+      echo "=== 本次提交包含 ==="
+      git diff --cached --stat | sed 's/^/  /'
       git commit -m "$MSG" || exit 1
     fi
     echo "提交： $(git log -1 --format='%h %s')"

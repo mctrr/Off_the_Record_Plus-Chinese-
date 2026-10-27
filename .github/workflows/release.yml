@@ -58,18 +58,19 @@ jobs:
           echo "base=$BASE"     >> "$GITHUB_OUTPUT"
           echo "== 主版本 $BASE / 第 $N 个提交"
 
-          # 本次提交如果只是改文档/CI，不出包。
-          # 判断依据：除了 md 和 .txt 说明、以及 .github/ 以外，有没有别的文件变动。
-          # 说明类文件一律按扩展名认，不再逐个列文件名——中文文件名在这里
-          # 很容易因为编码转义而漏配。
+          # 出不出包看「有没有动到会影响成品的东西」。
+          # 白名单而不是黑名单：跑脚本、改文档、调 CI 都不算；
+          # 只有下面这几个文件变了才值得给玩家发一版。
+          # 黑名单写法踩过坑——`*.txt` 一挡就把 新的汉化补丁.txt 这个
+          # 真正的成品源表也挡掉了。
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -vE '^(\.github/|.*\.md$|.*\.txt$)' || true)
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(新的汉化补丁\.txt|str_en\.txt|BCS_TXT\.exe|build\.py)$' || true)
             if [ -z "$CHANGED" ]; then
               echo "publish=no" >> "$GITHUB_OUTPUT"
-              echo "::notice::本次只动了说明/CI，跳过出包"
+              echo "::notice::没动成品相关文件（补丁表/英文表/打包器/build.py），跳过出包"
               exit 0
             fi
-            echo "实质改动："; echo "$CHANGED"
+            echo "动了成品相关文件："; echo "$CHANGED"
           fi
 
           VER="$BASE.$N"                    # 1.1 + 第16个提交 -> 1.1.16
