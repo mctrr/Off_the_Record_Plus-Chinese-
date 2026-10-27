@@ -86,7 +86,9 @@ jobs:
           DR2_VERSION: ${{ steps.vars.outputs.ver }}
         run: |
           set -eu
-          python build.py
+          # --no-install：build.py 默认会部署到本机游戏目录，CI 上没有那个路径，
+          # 必须只出包。GAME_BCS 指向 E:\SteamLibrary\...
+          python build.py --no-install
           echo "=== build/ ==="
           ls -la build/
           ZIP=$(ls build/*.zip | head -1)

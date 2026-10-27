@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 """一键构建《丧尸围城2：绝密档案 Plus》汉化补丁。
 
-    python build.py            体检 + 打包 + 出 build/ 社区包
-    python build.py --check    只体检，不打包
-    python build.py --install  再额外覆盖到游戏目录（覆盖前自动备份）
-    python build.py --force    体检有错也照样打包（危险）
+    python build.py               体检 + 打包 + 出 build/ 社区包 + 部署到游戏
+    python build.py --no-install  只打包出包，不碰游戏目录（CI 用这个）
+    python build.py --check       只体检，不打包也不部署
+    python build.py --force       体检有错也照样打包（危险）
 
 流程：结构体检 -> 硬伤阻断 -> 打包 .bcs -> 解包回读逐字节复核 -> 落盘
-      -> 出 build/（str_en.bcs + 安装说明 + 源码 + zip）-> [--install] 部署。
+      -> 出 build/（str_en.bcs + 安装说明 + zip）-> 部署到游戏。
 
+默认就部署。这是持续改进的项目，改完直接看效果，不留旧备份
+（2026-10-27 用户定：本来就要一直改，备份没意义）。
 .bcs 只在全部复核通过后才覆盖，中途失败不会动到已有的 .bcs。
---install 覆盖游戏文件前一定会先备份到 _backup/（保留最近 20 份）。
 """
 import os
 import re
@@ -46,9 +47,6 @@ PACKER = os.path.join(HERE, 'BCS_TXT.exe')
 
 # 社区发布包（直接上传这一整个目录 / 里面的 zip）
 BUILD_DIR = os.path.join(HERE, 'build')
-# 部署到游戏前的备份（不进 build/，免得跟发布包混在一起）
-BACKUP_DIR = os.path.join(HERE, '_backup')
-KEEP_BACKUPS = 20
 
 # 项目里有两级 .tools/（工作区根一个、仓库上层一个），一律多路径探测，哪个在就用哪个
 _ROOTS = [HERE, os.path.dirname(HERE), os.path.dirname(os.path.dirname(HERE))]
@@ -261,25 +259,13 @@ def publish(row_count):
 
 
 def install():
-    """部署到游戏目录 —— 覆盖前先把现有文件备份走。"""
+    """部署到游戏目录（默认行为，不备份）。"""
     print('\n=== 部署到游戏 ===')
     dst_dir = os.path.dirname(GAME_BCS)
     if not os.path.isdir(dst_dir):
         bad('部署', '游戏目录不存在：%s' % dst_dir)
+        print('  换个机器/不想装，加 --no-install 只打包。')
         return False
-
-    if os.path.exists(GAME_BCS):
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-        bk = os.path.join(BACKUP_DIR, 'str_en.bcs.%s'
-                          % time.strftime('%Y%m%d_%H%M%S'))
-        shutil.copyfile(GAME_BCS, bk)
-        ok('备份原文件', '%s（%d 字节）'
-           % (os.path.relpath(bk, HERE), os.path.getsize(bk)))
-        # 只留最近 N 份
-        olds = sorted(f for f in os.listdir(BACKUP_DIR)
-                      if f.startswith('str_en.bcs.'))
-        for f in olds[:-KEEP_BACKUPS]:
-            os.remove(os.path.join(BACKUP_DIR, f))
 
     shutil.copyfile(TARGET_BCS, GAME_BCS)
     same = open(GAME_BCS, 'rb').read() == open(TARGET_BCS, 'rb').read()
@@ -635,7 +621,9 @@ def main():
     publish(len(rows))
 
     # ------------------------------------------------------------ 部署
-    if '--install' in sys.argv and not install():
+    # 默认就部署——这是持续改进的项目，改完直接进游戏看效果。
+    # --no-install 只出包（CI 和「只想拿 zip」时用），--check 前面已返回。
+    if '--no-install' not in sys.argv and not install():
         return 2
 
     print('\n=== 完成：%s ===' % summary)

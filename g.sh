@@ -1,10 +1,10 @@
 #!/bin/sh
 # 汉化仓库速查：g 查看最近提交 / s 看未提交改动 / d 看某次改了什么
 #             p 开工前自检（每次动文件前先跑这个）
-#             b 构建（体检 + 打包 bcs + 出 build/ 发布包），多余参数透传给 build.py
-#             i 构建并部署到游戏（覆盖前自动备份到 _backup/）
+#             b 构建 + 部署到游戏（默认），加 --no-install 只出包
+#             i 同 b（老习惯，保留）
 #             c 提交并推 GitHub —— 推上去就自动出包、发两端发行版，不用管别的
-# 用法：sh g.sh [s|d <n>|p|g|b [--check|--install|--force]|i|c "<提交说明>"]
+# 用法：sh g.sh [s|d <n>|p|g|b [--no-install|--check|--force]|i|c "<提交说明>"]
 cd "$(dirname "$0")" || exit 1
 
 GH_REPO="mctrr/Off_the_Record_Plus-Chinese-.git"
@@ -12,13 +12,9 @@ GH_REPO="mctrr/Off_the_Record_Plus-Chinese-.git"
 GH_PROXY="http://127.0.0.1:10808"
 
 case "$1" in
-  b)
+  b|i)
     shift
     exec "${PYTHON:-python}" build.py "$@"
-    ;;
-  i)
-    shift
-    exec "${PYTHON:-python}" build.py --install "$@"
     ;;
   p)
     echo "=== 开工前自检 ==="

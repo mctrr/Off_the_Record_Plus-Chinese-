@@ -1,7 +1,8 @@
 # 编译产物：由 BCS_TXT.exe 从 txt 生成，不入库
 *.bcs
 
-# BCS_TXT.exe 是打包工具，GitCode 仓库跟踪它（玩家和协作者都要用），不再忽略。
+# 我自己看的不要上传
+GITHUB_CI_配置指南.txt
 
 # 构建出的发布包与部署备份
 build/

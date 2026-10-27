@@ -67,12 +67,18 @@ g.sh 全部命令
   sh g.sh s              看未提交改动
   sh g.sh g              最近 15 次提交
   sh g.sh d <n>          看某次提交改了哪些 ID
-  sh g.sh b              只构建，不出包不推
-  sh g.sh i              构建 + 部署到游戏（覆盖前自动备份）
+  sh g.sh b              构建 + 部署到游戏（默认，一条命令就能进游戏看效果）
+  sh g.sh i              同上（老习惯，保留）
+  sh g.sh b --no-install 只出包，不碰游戏目录
+  sh g.sh b --check      只体检，不打包也不部署
   sh g.sh c "说明"       提交 + 推 GitHub + 自动发版   ← 日常只用这个
 
   g.sh c 需要的 GitHub 令牌存在 .git/gh_token（一行纯 token）。
   .git/ 不进版本库，token 不会泄漏到仓库里。
+
+  部署不再留 _backup/：这是持续改进的项目，改完就要看效果，
+  每次拷一份旧文件只是占地方。旧的 _backup/ 目录还在，随时可删。
+  CI 里跑的是 build.py --no-install，云端没有游戏目录，不会尝试部署。
 
 
 已踩过的坑（别再重复）
